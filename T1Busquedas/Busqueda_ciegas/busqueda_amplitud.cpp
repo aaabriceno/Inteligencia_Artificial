@@ -9,6 +9,7 @@
 #include <algorithm>
 using namespace std;
 
+// Función BFS para encontrar el camino más corto entre el nodo inicio y el objetivo
 void bfs(int inicio, int objetivo, unordered_map<int, vector<int>>& grafo){
     queue<int> cola;
 
@@ -129,12 +130,39 @@ int main() {
     imprimirGrafo(grafo);
 
     int inicio, objetivo;
-    cout << "\nNodo de inicio: "; 
-    cin >> inicio;
-    cout << "Nodo objetivo: "; 
-    cin >> objetivo;
+    char respuesta;
 
-    bfs(inicio, objetivo, grafo);
+    // Ciclo para permitir múltiples consultas
+    while (true) {
+        cout << "\nNodo de inicio: "; 
+        cin >> inicio;
+
+        // Verificar si el nodo de inicio está presente en el grafo
+        if (grafo.find(inicio) == grafo.end()) {
+            cout << "El nodo de inicio no existe en el grafo.\n";
+            continue; // Si no existe, pedimos los nodos de nuevo
+        }
+
+        cout << "Nodo objetivo: "; 
+        cin >> objetivo;
+
+        // Verificar si el nodo objetivo está presente en el grafo
+        if (grafo.find(objetivo) == grafo.end()) {
+            cout << "El nodo objetivo no existe en el grafo.\n";
+            continue; // Si no existe, pedimos los nodos de nuevo
+        }
+        
+        // Ejecutar BFS para encontrar el camino
+        bfs(inicio, objetivo, grafo);
+
+        // Preguntar si el usuario quiere hacer otra consulta
+        cout << "\n¿Deseas hacer otra consulta? (s/n): ";
+        cin >> respuesta;
+
+        if (respuesta == 'n' || respuesta == 'N') {
+            break; // Si la respuesta es 'n' o 'N', salir del ciclo
+        }
+    }
 
     return 0;
 }
