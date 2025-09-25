@@ -1,390 +1,263 @@
 #include <GLFW/glfw3.h>
-#include <iostream>
+#include <GL/gl.h>
+#include <GL/glut.h>
 #include <vector>
-#include <queue>
-#include <set>
-#include <map>
 #include <cmath>
+#include <random>   
 #include <algorithm>
-#include <random>
-#include <stack>
 #include <thread>
+#include <iostream>
 #include <mutex>
-#include <atomic>
-#include <limits> // Para std::numeric_limits
+using namespace std;
 
-// --- Alias para coordenadas lógicas y de renderizado ---
-using Point = std::pair<int, int>;
-using PointF = std::pair<float, float>; // Para coordenadas de punto flotante en OpenGL
+// --- Parámetros editables ---
+int NUM_NODES; // Cambia aquí el número de nodos
+const int WINDOW_WIDTH = 800;
+const int WINDOW_HEIGHT = 800;
+const float NODE_RADIUS = 12.0f;
 
-// Estructura para el algoritmo A*
-struct Node {
-    Point position;
-    double cost;
-    double heuristic;
-    bool operator>(const Node& other) const {
-        return (cost + heuristic) > (other.cost + other.heuristic);
-    }
+bool debeSalir = false;
+mutex mtx;
+
+// --- Estructuras ---
+struct Nodo {
+    int id;
+    float x, y;
 };
+vector<Nodo> nodos;
+vector<vector<double>> distancias;
 
-// --- Estructura de Estado con Grilla Lógica ---
-struct GraphState {
-    int windowWidth = 1200;
-    int windowHeight =1200;
+// --- Generación aleatoria de nodos ---
+void generarNodos(int n) {
+    random_device rd; mt19937 gen(rd());
+    uniform_int_distribution<> disX(0,100);
+    uniform_int_distribution<> disY(0,100);
 
-    // --- Grilla con buen espaciado para que sea visible ---
-    int gridWidth = 100; // 80x80 = 6,400 nodos. Cada celda tendrá 10x10 píxeles.
-    int gridHeight = 100;
-
-    std::vector<Point> vertices;
-    std::map<Point, std::vector<Point>> adjacencyList;
-    std::vector<Point> path;
-    Point startNode, goalNode;
-    bool nodesSelected = false;
-};
-
-// --- Sincronización de Hilos ---
-std::mutex g_state_mutex;
-std::atomic<bool> g_should_terminate_thread(false);
-
-// Prototipos
-void generateGraph(GraphState& state);
-void removeNodes(GraphState& state, int percentage);
-std::vector<Point> searchDFS(GraphState& state, Point start, Point goal);
-std::vector<Point> searchBFS(GraphState& state, Point start, Point goal);
-std::vector<Point> searchHillClimbing(GraphState& state, Point start, Point goal);
-std::vector<Point> searchAStar(GraphState& state, Point start, Point goal);
-void showMenu(GraphState& state);
-
-double heuristic(Point a, Point b) {
-    return std::sqrt(std::pow(a.first - b.first, 2) + std::pow(a.second - b.second, 2));
+    nodos.clear();
+    for (int i = 0; i < n; ++i) {
+        nodos.push_back({i, (float)disX(gen), (float)disY(gen)});
+    }
 }
 
-void generateGraph(GraphState& state) {
-    state.vertices.clear();
-    state.adjacencyList.clear();
-    state.vertices.reserve(state.gridWidth * state.gridHeight);
-
-    for (int x = 0; x < state.gridWidth; ++x) {
-        for (int y = 0; y < state.gridHeight; ++y) {
-            state.vertices.emplace_back(x, y);
-        }
-    }
-
-    // --- ¡CORREGIDO! Conexiones en 8 direcciones (incluyendo diagonales) ---
-    for (int x = 0; x < state.gridWidth; ++x) {
-        for (int y = 0; y < state.gridHeight; ++y) {
-            Point current = {x, y};
-            for (int dx = -1; dx <= 1; ++dx) {
-                for (int dy = -1; dy <= 1; ++dy) {
-                    if (dx == 0 && dy == 0) continue; // No es vecino de sí mismo
-
-                    int nx = x + dx;
-                    int ny = y + dy;
-
-                    // Verificar si el vecino está dentro de los límites de la grilla
-                    if (nx >= 0 && nx < state.gridWidth && ny >= 0 && ny < state.gridHeight) {
-                        state.adjacencyList[current].push_back({nx, ny});
-                    }
-                }
-            }
+// --- Cálculo de matriz de distancias ---
+void calcularDistancias() {
+    int N = nodos.size();
+    distancias.assign(N, vector<double>(N, 0.0));
+    for (int i = 0; i < N; ++i) {
+        for (int j = 0; j < N; ++j) {
+            float dx = nodos[i].x - nodos[j].x;
+            float dy = nodos[i].y - nodos[j].y;
+            distancias[i][j] = sqrt(dx*dx + dy*dy);
         }
     }
 }
 
-void removeNodes(GraphState& state, int percentage) {
-    // (Sin cambios)
-    if (percentage <= 0 || percentage >= 100) return;
-    std::vector<Point> allVertices = state.vertices;
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::shuffle(allVertices.begin(), allVertices.end(), gen);
-    int nodesToRemoveCount = (allVertices.size() * percentage) / 100;
-    std::set<Point> removedNodes(allVertices.begin(), allVertices.begin() + nodesToRemoveCount);
-    state.vertices.erase(std::remove_if(state.vertices.begin(), state.vertices.end(),
-        [&](const Point& v) { return removedNodes.count(v); }), state.vertices.end());
-    for (const auto& removedNode : removedNodes) {
-        state.adjacencyList.erase(removedNode);
-    }
-    for (auto& pair : state.adjacencyList) {
-        pair.second.erase(std::remove_if(pair.second.begin(), pair.second.end(),
-            [&](const Point& neighbor) { return removedNodes.count(neighbor); }), pair.second.end());
+// --- Calcula la aptitud de una ruta ---
+double calcularAptitud(const vector<int>& ruta) {
+    double suma = 0;
+    int N = ruta.size();
+    for (int i = 0; i < N-1; ++i) suma += distancias[ruta[i]][ruta[i+1]];
+    suma += distancias[ruta[N-1]][ruta[0]]; // Regresa al inicio
+    return 1.0 / suma;
+}
+
+//Dibuja el numero de nodos sobre el circulo
+void dibujarNumeroNodo(float x, float y, int numero){
+    glColor3f(0,0,0); // Color negro para el texto
+    glRasterPos2f(x-5, y-5); // x e y ya están escalados
+    string numStr = to_string(numero);
+    for (char c: numStr){
+        glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, c);
     }
 }
 
-// --- Algoritmos de Búsqueda (sin cambios) ---
-std::vector<Point> searchDFS(GraphState& state, Point start, Point goal) {
-    std::stack<Point> stack;
-    std::map<Point, Point> cameFrom;
-    std::set<Point> visited;
-    stack.push(start);
-    visited.insert(start);
-    while (!stack.empty()) {
-        Point current = stack.top();
-        stack.pop();
-        if (current == goal) break;
-        if (state.adjacencyList.count(current)) {
-            for (const auto& neighbor : state.adjacencyList.at(current)) {
-                if (visited.find(neighbor) == visited.end()) {
-                    visited.insert(neighbor);
-                    cameFrom[neighbor] = current;
-                    stack.push(neighbor);
-                }
-            }
-        }
-    }
-    std::vector<Point> resultPath;
-    if (cameFrom.find(goal) == cameFrom.end()) return {};
-    for (Point at = goal; at != start; at = cameFrom[at]) { resultPath.push_back(at); }
-    resultPath.push_back(start);
-    std::reverse(resultPath.begin(), resultPath.end());
-    return resultPath;
-}
-std::vector<Point> searchBFS(GraphState& state, Point start, Point goal) {
-    std::queue<Point> queue;
-    std::map<Point, Point> cameFrom;
-    std::set<Point> visited;
-    queue.push(start);
-    visited.insert(start);
-    while (!queue.empty()) {
-        Point current = queue.front();
-        queue.pop();
-        if (current == goal) break;
-        if (state.adjacencyList.count(current)) {
-            for (const auto& neighbor : state.adjacencyList.at(current)) {
-                if (visited.find(neighbor) == visited.end()) {
-                    visited.insert(neighbor);
-                    cameFrom[neighbor] = current;
-                    queue.push(neighbor);
-                }
-            }
-        }
-    }
-    std::vector<Point> resultPath;
-    if (cameFrom.find(goal) == cameFrom.end()) return {};
-    for (Point at = goal; at != start; at = cameFrom[at]) { resultPath.push_back(at); }
-    resultPath.push_back(start);
-    std::reverse(resultPath.begin(), resultPath.end());
-    return resultPath;
-}
-std::vector<Point> searchHillClimbing(GraphState& state, Point start, Point goal) {
-    std::vector<Point> resultPath;
-    std::set<Point> visited;
-    Point current = start;
-    resultPath.push_back(current);
-    visited.insert(current);
-    while (current != goal) {
-        Point next = current;
-        double bestHeuristic = heuristic(current, goal);
-        if (state.adjacencyList.count(current)) {
-            for (const auto& neighbor : state.adjacencyList.at(current)) {
-                if (visited.find(neighbor) != visited.end()) continue;
-                double h = heuristic(neighbor, goal);
-                if (h < bestHeuristic) {
-                    bestHeuristic = h;
-                    next = neighbor;
-                }
-            }
-        }
-        if (next == current) break;
-        visited.insert(next);
-        resultPath.push_back(next);
-        current = next;
-    }
-    if (current != goal) return {};
-    return resultPath;
-}
-std::vector<Point> searchAStar(GraphState& state, Point start, Point goal) {
-    std::priority_queue<Node, std::vector<Node>, std::greater<Node>> openSet;
-    std::map<Point, double> gScore;
-    std::map<Point, Point> cameFrom;
-    gScore[start] = 0;
-    openSet.push({ start, 0, heuristic(start, goal) });
-    while (!openSet.empty()) {
-        Point current = openSet.top().position;
-        openSet.pop();
-        if (current == goal) break;
-        if (state.adjacencyList.count(current)) {
-            for (const auto& neighbor : state.adjacencyList.at(current)) {
-                double tentative_gScore = gScore[current] + heuristic(current, neighbor);
-                if (gScore.find(neighbor) == gScore.end() || tentative_gScore < gScore[neighbor]) {
-                    gScore[neighbor] = tentative_gScore;
-                    cameFrom[neighbor] = current;
-                    openSet.push({ neighbor, tentative_gScore, heuristic(neighbor, goal) });
-                }
-            }
-        }
-    }
-    std::vector<Point> resultPath;
-    if (cameFrom.find(goal) == cameFrom.end()) return {};
-    for (Point at = goal; at != start; at = cameFrom[at]) { resultPath.push_back(at); }
-    resultPath.push_back(start);
-    std::reverse(resultPath.begin(), resultPath.end());
-    return resultPath;
-}
-
-// --- FUNCIÓN DE RENDERIZADO (con los colores correctos) ---
-void render(const GraphState& state) {
-    glClear(GL_COLOR_BUFFER_BIT);
-    float cellWidth = (float)state.windowWidth / state.gridWidth;
-    float cellHeight = (float)state.windowHeight / state.gridHeight;
-    auto gridToGL = [&](Point p) -> PointF {
-        float pixelX = p.first * cellWidth + cellWidth / 2.0f;
-        float pixelY = p.second * cellHeight + cellHeight / 2.0f;
-        float glX = (pixelX / state.windowWidth) * 2.0f - 1.0f;
-        float glY = (pixelY / state.windowHeight) * 2.0f - 1.0f;
-        return {glX, glY};
-    };
-    // 1. DIBUJAR LA GRILLA DE FONDO SIEMPRE EN BLANCO
-    glColor3f(1.0f, 1.0f, 1.0f); // Color BLANCO
-    glLineWidth(1.0);
-    glBegin(GL_LINES);
-    for (const auto& pair : state.adjacencyList) {
-        PointF startGL = gridToGL(pair.first);
-        for (const auto& end : pair.second) {
-            // Optimización para no dibujar cada línea dos veces
-            if (pair.first < end) {
-                PointF endGL = gridToGL(end);
-                glVertex2f(startGL.first, startGL.second);
-                glVertex2f(endGL.first, endGL.second);
-            }
-        }
+// --- Dibuja círculo (nodo) ---
+void dibujarNodo(float x, float y, float r, float cr, float cg, float cb) {
+    glColor3f(cr, cg, cb);
+    glBegin(GL_TRIANGLE_FAN);
+    glVertex2f(x, y);
+    for (int i = 0; i <= 30; ++i) {
+        float t = 2.0f * 3.1415926f * i / 30;
+        glVertex2f(x + cos(t)*r, y + sin(t)*r);
     }
     glEnd();
-    // 2. DIBUJAR EL CAMINO ENCONTRADO EN AZUL
-    if (!state.path.empty()) {
-        glColor3f(0.0f, 0.5f, 1.0f);
-        glLineWidth(3.0);
-        glBegin(GL_LINE_STRIP);
-        for (const auto& p : state.path) {
-            PointF pGL = gridToGL(p);
-            glVertex2f(pGL.first, pGL.second);
-        }
-        glEnd();
+}
+
+// --- Dibuja aristas (todas) ---
+void dibujarAristas() {
+    glColor3f(0.7f, 0.7f, 0.7f);
+    glLineWidth(1.0);
+    glBegin(GL_LINES);
+    for (auto& n1 : nodos)
+        for (auto& n2 : nodos)
+            if (n1.id < n2.id) {
+                float x1 = n1.x * (WINDOW_WIDTH / 100.0f);
+                float y1 = n1.y * (WINDOW_HEIGHT / 100.0f);
+                float x2 = n2.x * (WINDOW_WIDTH / 100.0f);
+                float y2 = n2.y * (WINDOW_HEIGHT / 100.0f);
+                glVertex2f(x1, y1); glVertex2f(x2, y2);
+            }
+    glEnd();
+}
+
+// --- Dibujar un plano cartesiano
+void dibujarPlanoCartesiano() {
+    glColor3f(0.2f, 0.2f, 0.2f);
+    glLineWidth(2.0);
+    glBegin(GL_LINES);
+    // Eje X
+    glVertex2f(0, WINDOW_HEIGHT/2);
+    glVertex2f(WINDOW_WIDTH, WINDOW_HEIGHT/2);
+    // Eje Y
+    glVertex2f(WINDOW_WIDTH/2, 0);
+    glVertex2f(WINDOW_WIDTH/2, WINDOW_HEIGHT);
+    glEnd();
+}
+
+// --- Dibuja ruta ---
+void dibujarRuta(const vector<int>& ruta) {
+    glColor3f(0.2f, 0.8f, 1.0f);
+    glLineWidth(3.0);
+    glBegin(GL_LINE_STRIP);
+    for (int idx : ruta) {
+        float x = nodos[idx].x * (WINDOW_WIDTH / 100.0f);
+        float y = nodos[idx].y * (WINDOW_HEIGHT / 100.0f);
+        glVertex2f(x, y);
     }
-    // 3. DIBUJAR NODOS DE INICIO Y FIN
-    if (state.nodesSelected) {
-        glPointSize(10.0);
-        glBegin(GL_POINTS);
-        PointF startGL = gridToGL(state.startNode);
-        glColor3f(0.0f, 1.0f, 0.0f); // VERDE
-        glVertex2f(startGL.first, startGL.second);
-        PointF goalGL = gridToGL(state.goalNode);
-        glColor3f(1.0f, 0.0, 0.0f); // ROJO
-        glVertex2f(goalGL.first, goalGL.second);
-        glEnd();
+    // Cierra ciclo
+    float x0 = nodos[ruta[0]].x * (WINDOW_WIDTH / 100.0f);
+    float y0 = nodos[ruta[0]].y * (WINDOW_HEIGHT / 100.0f);
+    glVertex2f(x0, y0);
+    glEnd();
+}
+
+// --- Renderizado completo ---
+void render(const vector<int>& rutaActual = {}) {
+    glClear(GL_COLOR_BUFFER_BIT);
+    //dibujarPlanoCartesiano(); // Dibuja los ejes
+    dibujarAristas();
+    if (!rutaActual.empty()) dibujarRuta(rutaActual);
+    for (auto& n : nodos){
+    dibujarNodo(n.x * (WINDOW_WIDTH / 100.0f), n.y * (WINDOW_HEIGHT / 100.0f), NODE_RADIUS, 1.0f, 0.3f, 0.3f);
+    dibujarNumeroNodo(n.x * (WINDOW_WIDTH / 100.0f), n.y * (WINDOW_HEIGHT / 100.0f), n.id);
+    }
+}
+
+// --- Ejemplo: calcula una ruta aleatoria y su aptitud ---
+vector<int> mejorRuta;
+double mejorAptitud = 0.0;
+
+void buscarMejorRuta(int intentos = 2000) {
+    int N = nodos.size();
+    mejorAptitud = 0.0;
+    mejorRuta.clear();
+    vector<int> ruta(N);
+    iota(ruta.begin(), ruta.end(), 0);
+
+    mutex mtx;
+    auto probar = [&](int inicio, int fin){
+        vector<int> localRuta = ruta;
+        double localMejor = 0.0; vector<int> localMejorRuta;
+        random_device rd; mt19937 gen(rd());
+        for (int i=inicio; i<fin; ++i) {
+            shuffle(localRuta.begin(), localRuta.end(), gen);
+            double apt = calcularAptitud(localRuta);
+            if (apt > localMejor) { localMejor = apt; localMejorRuta = localRuta; }
+        }
+        if (localMejor > mejorAptitud) {
+            lock_guard<mutex> lock(mtx);
+            if (localMejor > mejorAptitud) {
+                mejorAptitud = localMejor; mejorRuta = localMejorRuta;
+            }
+        }
+    };
+    int threads = min(8, intentos/200);
+    vector<thread> ths;
+    int chunk = intentos/threads;
+    for (int t=0; t<threads; ++t)
+        ths.emplace_back(probar, t*chunk, (t+1)*chunk);
+    for(auto& th:ths) th.join();
+}
+
+void limpiarGrafo(){
+    nodos.clear();
+    distancias.clear();
+    mejorRuta.clear();
+    mejorAptitud = 0.0;
+}
+
+void menuInteractivo() {
+    while (!debeSalir) {
+        int opcion;
+        cout << "\n--- Menú ---\n";
+        cout << "1. Generar nuevo grafo\n";
+        cout << "2. Limpiar gráfica\n";
+        cout << "3. Salir\n";
+        cout << "Seleccione una opción: ";
+        cin >> opcion;
+        if (opcion == 1) {
+            cout << "Cantidad de nodos: ";
+            int n; cin >> n;
+            std::lock_guard<std::mutex> lock(mtx);
+            NUM_NODES = n;
+            generarNodos(NUM_NODES);
+            calcularDistancias();
+            buscarMejorRuta(4000);
+            cout << "Valores de x e y de los nodos generados:\n";
+            for (const auto& n : nodos) {
+                cout << "Nodo " << n.id << ": (" << n.x << ", " << n.y << ")\n";
+            }
+            cout << "\nMejor ruta encontrada (aleatoria): ";
+            for(int v:mejorRuta) cout << v << " ";
+            cout << mejorRuta[0] << " (regresa al inicio)\n";
+            cout << "Aptitud (mayor es mejor): " << mejorAptitud << endl;
+        } else if (opcion == 2) {
+            std::lock_guard<std::mutex> lock(mtx);
+            limpiarGrafo();
+            cout << "Gráfica limpiada.\n";
+        } else if (opcion == 3) {
+            debeSalir = true;
+            cout << "Saliendo...\n";
+        } else {
+            cout << "Opción inválida.\n";
+        }
     }
 }
 
 int main() {
+    int argc = 1; char* argv[1] = {(char*)"app"};
+    glutInit(&argc, argv);
+
     if (!glfwInit()) return -1;
-    GraphState state;
-    GLFWwindow* window = glfwCreateWindow(state.windowWidth, state.windowHeight, "Graph Search - Malla Visible", NULL, NULL);
-    if (!window) {
-        glfwTerminate();
-        return -1;
-    }
+    GLFWwindow* window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "TSP OpenGL", NULL, NULL);
+    if (!window) { glfwTerminate(); return -1; }
     glfwMakeContextCurrent(window);
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    generateGraph(state);
-    std::cout << "Total de nodos creados: " << state.vertices.size() << std::endl;
-    std::thread menuThread(showMenu, std::ref(state));
-    while (!glfwWindowShouldClose(window) && !g_should_terminate_thread) {
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(0, WINDOW_WIDTH, 0, WINDOW_HEIGHT, -1, 1);
+    glMatrixMode(GL_MODELVIEW);
+
+    // Lanza el menú en un hilo
+    thread menuThread(menuInteractivo);
+
+    while (!glfwWindowShouldClose(window) && !debeSalir) {
         {
-            std::lock_guard<std::mutex> lock(g_state_mutex);
-            render(state);
+            std::lock_guard<std::mutex> lock(mtx);
+            if(!nodos.empty()){
+                render(mejorRuta);
+            }
+            else{
+                glClear(GL_COLOR_BUFFER_BIT);
+            }
+            
         }
         glfwSwapBuffers(window);
         glfwPollEvents();
+        this_thread::sleep_for(std::chrono::milliseconds(30));
     }
-    g_should_terminate_thread = true;
-    std::cout << "\nCerrando. Por favor, presione Enter en la consola para finalizar el programa." << std::endl;
+    debeSalir = true;
     menuThread.join();
     glfwDestroyWindow(window);
     glfwTerminate();
     return 0;
-}
-
-// --- FUNCIÓN DE MENÚ (sin cambios) ---
-void showMenu(GraphState& state) {
-    while (!g_should_terminate_thread) {
-        int choice;
-        std::cout << "\n=========== MENU ===========\n";
-        std::cout << "1. Eliminar un porcentaje de nodos\n";
-        std::cout << "2. Realizar una busqueda de camino\n";
-        std::cout << "3. Salir del programa\n";
-        std::cout << "============================\n";
-        std::cout << "Seleccione una opcion: ";
-        std::cin >> choice;
-        if (std::cin.fail()) {
-            std::cout << "Error: Entrada invalida. Por favor, ingrese solo un numero.\n";
-            std::cin.clear();
-            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-            continue;
-        }
-        if (choice == 1) {
-            int percentage;
-            std::cout << "Ingrese el porcentaje de nodos a eliminar (1-99): ";
-            std::cin >> percentage;
-            if (std::cin.fail() || percentage <= 0 || percentage >= 100) {
-                 std::cout << "Error: Porcentaje invalido.\n";
-                 std::cin.clear();
-                 std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-                 continue;
-            }
-            std::lock_guard<std::mutex> lock(g_state_mutex);
-            removeNodes(state, percentage);
-            std::cout << "Nodos eliminados correctamente.\n";
-        } else if (choice == 2) {
-            int searchType;
-            std::cout << "\n--- Seleccione Algoritmo de Busqueda ---\n";
-            std::cout << "1. Profundidad (DFS)\n";
-            std::cout << "2. Amplitud (BFS)\n";
-            std::cout << "3. Escalada (Hill Climbing)\n";
-            std::cout << "4. A* (A-Star)\n";
-            std::cout << "Seleccione una opcion: ";
-            std::cin >> searchType;
-            if (std::cin.fail() || searchType < 1 || searchType > 4) {
-                 std::cout << "Error: Opcion de algoritmo invalida.\n";
-                 std::cin.clear();
-                 std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-                 continue;
-            }
-            int x1, y1, x2, y2;
-            std::cout << "\nLa grilla es de " << state.gridWidth << "x" << state.gridHeight << " nodos.\n";
-            std::cout << "Ingrese nodo inicial (x y) [ej: 0 0]: ";
-            std::cin >> x1 >> y1;
-            std::cout << "Ingrese nodo final (x y) [ej: " << state.gridWidth - 1 << " " << state.gridHeight - 1 << "]: ";
-            std::cin >> x2 >> y2;
-            if (std::cin.fail()) {
-                 std::cout << "Error: Coordenadas invalidas.\n";
-                 std::cin.clear();
-                 std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-                 continue;
-            }
-            if (x1 < 0 || x1 >= state.gridWidth || y1 < 0 || y1 >= state.gridHeight || x2 < 0 || x2 >= state.gridWidth || y2 < 0 || y2 >= state.gridHeight) {
-                std::cout << "Error: Las coordenadas estan fuera de los limites de la grilla.\n";
-                continue;
-            }
-            std::vector<Point> foundPath;
-            Point start = {x1, y1}; Point goal = {x2, y2};
-            if (searchType == 1) foundPath = searchDFS(state, start, goal);
-            else if (searchType == 2) foundPath = searchBFS(state, start, goal);
-            else if (searchType == 3) foundPath = searchHillClimbing(state, start, goal);
-            else if (searchType == 4) foundPath = searchAStar(state, start, goal);
-            std::lock_guard<std::mutex> lock(g_state_mutex);
-            state.path = foundPath;
-            state.startNode = start;
-            state.goalNode = goal;
-            state.nodesSelected = true;
-            if (state.path.empty()) { std::cout << "Resultado: No se encontro un camino.\n"; }
-            else { std::cout << "Resultado: Camino encontrado con " << state.path.size() << " nodos.\n"; }
-        } else if (choice == 3) {
-            std::cout << "Saliendo...\n";
-            g_should_terminate_thread = true;
-            break;
-        } else {
-            std::cout << "Opcion no valida. Intente de nuevo.\n";
-        }
-    }
 }
