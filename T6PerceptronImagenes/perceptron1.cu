@@ -69,12 +69,12 @@ __global__ void backward_kernel(double* __restrict__ W,
     }
 }
 
-struct DenseLayer {
+struct CapaDensa {
     int input_size, output_size;
     vector<double> h_W, h_b;
     double *d_W, *d_b, *d_input, *d_output;
 
-    DenseLayer(int in_size, int out_size) {
+    CapaDensa(int in_size, int out_size) {
         input_size = in_size;
         output_size = out_size;
 
@@ -95,7 +95,7 @@ struct DenseLayer {
         cudaMemcpy(d_b, h_b.data(), sizeof(double) * out_size, cudaMemcpyHostToDevice);
     }
 
-    ~DenseLayer() {
+    ~CapaDensa() {
         cudaFree(d_W);
         cudaFree(d_b);
         cudaFree(d_input);
@@ -128,7 +128,7 @@ struct DenseLayer {
 };
 
 struct SimpleMLP {
-    DenseLayer output;
+    CapaDensa output;
     double lr;
 
     SimpleMLP(int input_size, int output_size, double lr_)
