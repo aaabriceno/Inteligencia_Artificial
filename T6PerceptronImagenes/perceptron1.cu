@@ -23,7 +23,7 @@ __global__ void forward_kernel(const double* __restrict__ W,
                                const double* __restrict__ input,
                                double* __restrict__ output,
                                int input_size, int output_size) {
-    int i = blockIdx.x;    // neurona (salida)
+    int i = blockIdx.x;  
     int tid = threadIdx.x;
 
     if (i >= output_size) return;
@@ -38,7 +38,6 @@ __global__ void forward_kernel(const double* __restrict__ W,
 
     if (tid == 0) {
         double total = b[i];
-        // Sumar solo la cantidad double de hilos del bloque
         for (int k = 0; k < blockDim.x; ++k) total += sum[k];
         output[i] = sigmoid(total);
     }
@@ -46,7 +45,7 @@ __global__ void forward_kernel(const double* __restrict__ W,
 
 __global__ void backward_kernel(double* __restrict__ W,
                                        double* __restrict__ b,
-                                       const double* __restrict__ grad_out, // ya incluye derivada de sigmoid
+                                       const double* __restrict__ grad_out,
                                        const double* __restrict__ input,
                                        int input_size, int output_size,
                                        double lr) {
@@ -58,8 +57,6 @@ __global__ void backward_kernel(double* __restrict__ W,
         //atomicAdd(&W[i * input_size + col], lr * grad);
         W[i * input_size + col] += lr * grad_out[i] * input[col];
     }
-
-    // Sesgo: un solo hilo por bloque
     if (tid == 0) {
         //atomicAdd(&b[i], lr * grad_out[i]);
         b[i] += lr * grad_out[i];
@@ -285,6 +282,7 @@ int main() {
     return 0;
 
 }
+
 
 
 
