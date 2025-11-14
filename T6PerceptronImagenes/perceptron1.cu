@@ -58,7 +58,6 @@ __global__ void backward_kernel(double* __restrict__ W,
         W[i * input_size + col] += lr * grad_out[i] * input[col];
     }
     if (tid == 0) {
-        //atomicAdd(&b[i], lr * grad_out[i]);
         b[i] += lr * grad_out[i];
     }
 }
@@ -282,6 +281,7 @@ int main() {
     return 0;
 
 }
+
 
 
 
