@@ -12,12 +12,12 @@ using namespace std;
 
 #define BLOCK_SIZE 256 //numero de hilos por cada bloque, tamaño en pocas palabras
 
-//funcion que se usa para comprimir las salidas entre 0 y 1
+
 __host__ __device__ inline double sigmoid(double x) {
     return static_cast<double>(1.0) / (static_cast<double>(1.0) + exp(-x));
 }
 
-// forward: 1 bloque por neurona, BLOCK_SIZE hilos por bloque
+
 __global__ void forward_kernel(const double* __restrict__ W,
                                const double* __restrict__ b,
                                const double* __restrict__ input,
@@ -31,7 +31,6 @@ __global__ void forward_kernel(const double* __restrict__ W,
     __shared__ double sum[BLOCK_SIZE];
     sum[tid] = 0.0;
 
-    // Acumulación en stride por hilo
     for (int j = tid; j < input_size; j += blockDim.x) {
         sum[tid] += W[i * input_size + j] * input[j];
     }
@@ -51,7 +50,7 @@ __global__ void backward_kernel(double* __restrict__ W,
                                        const double* __restrict__ input,
                                        int input_size, int output_size,
                                        double lr) {
-    int i = blockIdx.x;   // determina que neurona de salida esta que se calcula
+    int i = blockIdx.x;   
     int tid = threadIdx.x;
 
     if (i >= output_size) return;
@@ -286,4 +285,5 @@ int main() {
     return 0;
 
 }
+
 
