@@ -10,7 +10,7 @@
 #include <curand_kernel.h>
 using namespace std;
 
-#define BLOCK_SIZE 256 //numero de hilos por cada bloque, tamaño en pocas palabras
+#define BLOCK_SIZE 256 
 
 
 __host__ __device__ inline double sigmoid(double x) {
@@ -285,5 +285,6 @@ int main() {
     return 0;
 
 }
+
 
 
