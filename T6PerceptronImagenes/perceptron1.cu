@@ -45,7 +45,6 @@ __global__ void forward_kernel(const double* __restrict__ W,
     }
 }
 
-// backward: 1 bloque por neurona, cada hilo actualiza muchas columnas en stride
 __global__ void backward_kernel(double* __restrict__ W,
                                        double* __restrict__ b,
                                        const double* __restrict__ grad_out, // ya incluye derivada de sigmoid
@@ -56,8 +55,6 @@ __global__ void backward_kernel(double* __restrict__ W,
     int tid = threadIdx.x;
 
     if (i >= output_size) return;
-
-    // Actualiza TODAS las columnas (features) de W con stride de blockDim.x
     for (int col = tid; col < input_size; col += blockDim.x) {
         //atomicAdd(&W[i * input_size + col], lr * grad);
         W[i * input_size + col] += lr * grad_out[i] * input[col];
@@ -289,3 +286,4 @@ int main() {
     return 0;
 
 }
+
