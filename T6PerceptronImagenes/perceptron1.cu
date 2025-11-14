@@ -10,8 +10,9 @@
 #include <curand_kernel.h>
 using namespace std;
 
-#define BLOCK_SIZE 256
+#define BLOCK_SIZE 256 //numero de hilos por cada bloque, tamaño en pocas palabras
 
+//funcion que se usa para comprimir las salidas entre 0 y 1
 __host__ __device__ inline double sigmoid(double x) {
     return static_cast<double>(1.0) / (static_cast<double>(1.0) + exp(-x));
 }
@@ -51,7 +52,7 @@ __global__ void backward_kernel(double* __restrict__ W,
                                        const double* __restrict__ input,
                                        int input_size, int output_size,
                                        double lr) {
-    int i = blockIdx.x;   // neurona salida
+    int i = blockIdx.x;   // determina que neurona de salida esta que se calcula
     int tid = threadIdx.x;
 
     if (i >= output_size) return;
@@ -286,4 +287,5 @@ int main() {
     cout << "Test acc: " << test_acc << "%" << endl;
 
     return 0;
+
 }
