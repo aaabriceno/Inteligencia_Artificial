@@ -1,0 +1,59 @@
+# PASO 1: Comprobar GPU y entorno CUDA
+
+# Verificar si la GPU está habilitada en este Colab
+!nvidia-smi
+
+# Verificar que Colab tiene los controladores y herramientas de CUDA necesarias instaladas
+!nvcc --version
+
+
+# PASO 2: Descargar y preparar los datos CIFAR-10 (formato binario)
+print("\n--- Descargando y extrayendo datos de CIFAR-10 (formato binario) ---")
+
+# Descargar el archivo tar.gz directamente desde la página oficial del CIFAR-10
+!wget -q -c https://www.cs.toronto.edu/~kriz/cifar-10-binary.tar.gz
+
+# Extraer el archivo en el directorio actual
+!tar -xzf cifar-10-binary.tar.gz
+
+print("Datos descargados y extraídos correctamente. Archivos disponibles en la carpeta 'cifar-10-batches-bin'.")
+
+# PASO 3: Clonar el repositorio GitHub para obtener el código CUDA
+
+print("\n--- Clonando el repositorio GitHub con el código fuente ---")
+!git clone https://github.com/aaabriceno/Inteligencia_Artificial.git
+
+# Verificar que el repositorio se clonó correctamente
+print("\n--- Archivos clonados: ---")
+!ls Inteligencia_Artificial/T6PerceptronImagenes/
+
+# PASO 4: Copiar los datos de CIFAR-10 al directorio del código CUDA
+
+print("\n--- Moviendo los datos binarios de CIFAR-10 al directorio de trabajo ---")
+
+# Copiar los archivos .bin de "cifar-10-batches-bin" al directorio donde está el archivo .cu
+!cp cifar-10-batches-bin/*.bin Inteligencia_Artificial/T6PerceptronImagenes/
+
+# Cambiar el directorio de trabajo al del archivo CUDA
+%cd Inteligencia_Artificial/T6PerceptronImagenes/
+
+# Confirmar que los datos están en el directorio correcto
+print("\n--- Archivos disponibles en el directorio actual: ---")
+!ls
+
+# PASO 5: Compilar el código CUDA usando nvcc
+
+print("\n--- Compilando el código CUDA (perceptron1.cu) ---")
+
+# Usar el compilador nvcc para compilar el archivo
+!nvcc perceptron1.cu -o perceptron_executable -arch=sm_75
+
+print("\n--- Compilación finalizada. Se generó 'perceptron_executable'. ---")
+
+# PASO 6: Ejecutar el programa compilado
+print("\n--- Ejecutando el programa CUDA (perceptron_executable) ---")
+
+# Ejecutar el archivo compilado
+!./perceptron_executable
+
+print("\n--- Entrenamiento completado. ---")
