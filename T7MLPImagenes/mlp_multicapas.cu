@@ -1,4 +1,3 @@
-%%writefile mlp.cu
 #include <iostream>
 #include <vector>
 #include <fstream>
@@ -623,4 +622,5 @@ int main() {
     cout << "Test acc: " << test_acc << "%" << endl;
 
     return 0;
+
 }
