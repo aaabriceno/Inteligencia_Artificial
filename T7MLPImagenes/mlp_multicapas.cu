@@ -87,6 +87,7 @@ vector<double> add_noise(const vector<double>& img) {
     }
     return out;
 }
+
 vector<double> zoom_in(const vector<double>& img) {
     static random_device rd;
     static mt19937 gen(rd());
